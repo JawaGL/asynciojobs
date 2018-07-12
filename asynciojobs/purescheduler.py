@@ -121,8 +121,6 @@ class PureScheduler:                                    # pylint: disable=r0902
         self.shutdown_timeout = shutdown_timeout
         self.watch = watch
         self.verbose = verbose
-        self.exiting = False
-        self.exit_status = True
         #
         # why does it fail ?
         # bool
@@ -623,72 +621,6 @@ class PureScheduler:                                    # pylint: disable=r0902
             print()
 
     ####################
-    def close_connection(self):
-        """
-        A synchroneous wrapper arrount :meth:`co_close_connection()`.
-
-        Returns:
-        bool: True if everything went well, False otherwise;
-        see: co_close_connection()
-        """
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.co_close_connection())
-
-    async def co_close_connection(self):
-        """
-        First, gather all remote nodes inside a `set by calling
-        :meth:`~asynciojobs.job.AbstractJob.get_node()`
-        method to all the jobs, possibly nested.
-
-        Then it will seprate the node that are gateways and those who are not.
-
-        Finally it call :meth:`~apssh.sshnode.close()` method first on the set
-        containing the non-gateway node and then on the gateway node. If there
-        is a cross dependance, then `alea jacta est`.
-
-        Typically for example, several jobs sharing the same ssh connection
-        will arrange for that connection to be kept alive across an entire
-        scheduler lifespan, but there is a need to tear these connections
-        down eventually.
-
-        Returns:
-          bool: True if all the
-          :meth:`~~apssh.sshnode.close()`
-          methods attached to the nodes in the scheduler complete AND there
-          were no remaining jobs running, false otherwise.
-          xxx The second part is for now not OK since close do not
-          give any info
-        """
-        self.exiting = True
-        await self.co_shutdown()
-        gateways = set()
-        not_gateways = set()
-        middle_nodes = set()
-        killable_nodes = set
-        for job in self.jobs:
-            node = job.get_node()
-            if node:
-                if node.gateway:
-                    not_gateways.add(node)
-                    gateways.add(node.gateway)
-                else:
-                    gateways.add(node)
-        while len(not_gateways) > 0:
-
-            for node in not_gateways:
-                if node.gateway in not_gateways:
-                    middle_nodes.add(node.gateway)
-            killable_nodes = not_gateways - middle_nodes
-            middle_nodes = set()
-            not_gateways = not_gateways - killable_nodes
-            for node in killable_nodes:
-                await node.close()
-            killable_nodes = set()
-
-        for node in gateways:
-            await node.close()
-
-        return self.exit_status
 
     def shutdown(self):
         """
@@ -871,8 +803,7 @@ class PureScheduler:                                    # pylint: disable=r0902
                 # clean up
                 await self._feedback(pending, "ABORTING")
                 await self._tidy_tasks(pending)
-                if not self.exiting:
-                    await self.co_shutdown()
+                await self.co_shutdown()
                 self._failed_timeout = self.timeout
                 return False
 
@@ -895,15 +826,13 @@ class PureScheduler:                                    # pylint: disable=r0902
                         self._show_task_stack(done_task, "DEBUG")
 
             if critical_failure:
-                self.exit_status = False
-                if not self.exiting:
-                    await self._tidy_tasks(pending)
-                    await self.co_shutdown()
-                    self._failed_critical = True
-                    await self._feedback(
-                        None, "Emergency exit upon exception in critical job",
-                        force=True)
-                    return False
+                await self._tidy_tasks(pending)
+                await self.co_shutdown()
+                self._failed_critical = True
+                await self._feedback(
+                    None, "Emergency exit upon exception in critical job",
+                    force=True)
+                return False
 
             # are we done ?
             # only account for not forever jobs (that may still finish, one
@@ -924,8 +853,7 @@ class PureScheduler:                                    # pylint: disable=r0902
                 await self._feedback(pending, "TIDYING forever")
                 await self._tidy_tasks(pending)
 
-                if not self.exiting:
-                    await self.co_shutdown()
+                await self.co_shutdown()
                 return True
 
             # go on : find out the jobs that can be added to the mix

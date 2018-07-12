@@ -606,10 +606,6 @@ class AbstractJob:                                      # pylint: disable=R0902
         when called with `details=True`.
         """
         pass
-    def get_node(self):
-
-        # Need to be redefined for jobs that use remote nodes.
-        return None
 
 class Job(AbstractJob):
 
